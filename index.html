@@ -4,56 +4,210 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>班級閱讀教材</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <style>
-        /* 讓網頁全螢幕，不要有白邊 */
+        /* 基礎設定 */
         body, html {
             margin: 0;
             padding: 0;
             height: 100%;
-            overflow: hidden;
-            background-color: #333; /* 背景深灰色，保護眼睛 */
+            overflow: hidden; /* 禁止瀏覽器本身的捲動 */
+            background-color: #333;
+            font-family: Arial, sans-serif;
+            touch-action: manipulation; /* 優化觸控反應 */
         }
-        
-        /* 閱讀器容器設定 */
-        .pdf-container {
+
+        /* 畫布容器：讓 PDF 頁面置中 */
+        #canvas-container {
             width: 100%;
-            height: 100vh; /* 佔滿視窗高度 */
+            height: 100%;
             display: flex;
             justify-content: center;
             align-items: center;
+            position: relative;
         }
 
-        /* 嵌入 PDF 的區塊 */
-        iframe {
-            width: 100%;
+        /* 實際顯示 PDF 的畫布 */
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* 隱形的翻頁按鈕區塊 */
+        .nav-zone {
+            position: absolute;
+            top: 0;
             height: 100%;
-            border: none;
+            width: 30%; /* 左右各 30% 區域是按鈕 */
+            z-index: 10;
+            cursor: pointer;
+        }
+        #left-zone { left: 0; }
+        #right-zone { right: 0; }
+
+        /* 頁數顯示器 */
+        #page-loader {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 20;
+            pointer-events: none; /* 讓點擊穿透 */
         }
 
-        /* 備用按鈕：如果平板太舊跑不出來顯示這個 */
-        .fallback {
-            display: none;
+        /* 讀取中的轉圈圈 */
+        #loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             color: white;
-            text-align: center;
-            font-family: sans-serif;
-        }
-        
-        /* 針對不支援 iframe 的舊裝置顯示備用訊息 */
-        iframe:not(:defined) + .fallback {
-            display: block;
+            font-size: 20px;
         }
     </style>
 </head>
 <body>
 
-    <div class="pdf-container">
-        <iframe src="book.pdf#view=FitH" allow="autoplay">
-            <div class="fallback" style="display:block; padding: 20px;">
-                <p>您的平板似乎無法直接預覽 PDF。</p>
-                <a href="book.pdf" style="color: #4CAF50; font-size: 20px; text-decoration: none; border: 2px solid #4CAF50; padding: 10px 20px; border-radius: 5px;">點擊這裡開啟教材</a>
-            </div>
-        </iframe>
+    <div id="loading-spinner">教材載入中...</div>
+
+    <div id="canvas-container">
+        <canvas id="the-canvas"></canvas>
+        
+        <div id="left-zone" onclick="onPrevPage()"></div>
+        <div id="right-zone" onclick="onNextPage()"></div>
+        
+        <div id="page-loader">
+            <span id="page-num">--</span> / <span id="page-count">--</span>
+        </div>
     </div>
 
+    <script>
+        // 設定 PDF 檔案路徑
+        var url = 'book.pdf';
+
+        // 設定 PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        var pdfDoc = null,
+            pageNum = 1,
+            pageRendering = false,
+            pageNumPending = null,
+            scale = 2.0, // 解析度倍率，設高一點文字比較清晰
+            canvas = document.getElementById('the-canvas'),
+            ctx = canvas.getContext('2d');
+
+        // 下載 PDF
+        pdfjsLib.getDocument(url).promise.then(function(pdfDoc_) {
+            pdfDoc = pdfDoc_;
+            document.getElementById('page-count').textContent = pdfDoc.numPages;
+            document.getElementById('loading-spinner').style.display = 'none'; // 隱藏載入字樣
+
+            // 初始渲染第一頁
+            renderPage(pageNum);
+        }).catch(function(error) {
+            console.error('Error loading PDF:', error);
+            document.getElementById('loading-spinner').textContent = '無法載入 PDF，請確認檔名是否為 book.pdf';
+        });
+
+        // 渲染頁面的函數
+        function renderPage(num) {
+            pageRendering = true;
+            
+            // 抓取該頁面
+            pdfDoc.getPage(num).then(function(page) {
+                // 計算適合螢幕的大小
+                var container = document.getElementById('canvas-container');
+                var viewport = page.getViewport({scale: 1});
+                
+                // 自動計算縮放比例：讓頁面剛好塞滿寬度或高度
+                var scaleX = container.clientWidth / viewport.width;
+                var scaleY = container.clientHeight / viewport.height;
+                var finalScale = Math.min(scaleX, scaleY) * 0.95; // 留一點邊距
+
+                viewport = page.getViewport({scale: finalScale});
+
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+
+                // 將 PDF 畫到 Canvas 上
+                var renderContext = {
+                    canvasContext: ctx,
+                    viewport: viewport
+                };
+                var renderTask = page.render(renderContext);
+
+                // 等待渲染完成
+                renderTask.promise.then(function() {
+                    pageRendering = false;
+                    if (pageNumPending !== null) {
+                        renderPage(pageNumPending);
+                        pageNumPending = null;
+                    }
+                });
+            });
+
+            // 更新頁碼文字
+            document.getElementById('page-num').textContent = num;
+        }
+
+        // 如果渲染中又有人按翻頁，先暫存起來
+        function queueRenderPage(num) {
+            if (pageRendering) {
+                pageNumPending = num;
+            } else {
+                renderPage(num);
+            }
+        }
+
+        // 上一頁
+        function onPrevPage() {
+            if (pageNum <= 1) return;
+            pageNum--;
+            queueRenderPage(pageNum);
+        }
+
+        // 下一頁
+        function onNextPage() {
+            if (pageNum >= pdfDoc.numPages) return;
+            pageNum++;
+            queueRenderPage(pageNum);
+        }
+
+        // 監聽鍵盤左右鍵 (方便電腦測試用)
+        document.addEventListener('keydown', function(e) {
+            if(e.key === "ArrowLeft") onPrevPage();
+            if(e.key === "ArrowRight") onNextPage();
+        });
+
+        // 監聽視窗大小改變，重新調整頁面大小
+        window.addEventListener('resize', function() {
+            renderPage(pageNum);
+        });
+        
+        // 簡單的觸控滑動支援 (Swipe)
+        let touchStartX = 0;
+        let touchEndX = 0;
+        
+        document.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+        });
+
+        document.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        });
+
+        function handleSwipe() {
+            if (touchEndX < touchStartX - 50) onNextPage(); // 向左滑 (下一頁)
+            if (touchEndX > touchStartX + 50) onPrevPage(); // 向右滑 (上一頁)
+        }
+
+    </script>
 </body>
 </html>
