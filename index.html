@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>永齡情緒課讀本閱讀 </title>
+    <title>永齡情緒課讀本閱讀</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
     
@@ -22,37 +22,30 @@
             font-family: sans-serif;
         }
 
-        /* 舞台：改用 Grid，這是解決置中偏移的終極手段 */
         #reader-stage {
             width: 100%;
             height: 100%;
-            display: grid;         /* 關鍵改變 */
-            place-items: center;   /* 關鍵改變：水平垂直絕對置中 */
+            display: grid;
+            place-items: center;
             position: relative;
         }
 
-        /* 縮放容器：不再設 95%，而是全滿，讓內部內容自己找中心 */
         #zoom-container {
             width: 100%; 
             height: 100%;
-            display: flex;         /* 內部再次使用 Flex 確保萬無一失 */
+            display: flex;
             justify-content: center;
             align-items: center;
             outline: none;
         }
 
-        /* 畫布本體 */
         canvas {
             display: block;
-            box-shadow: 0 0 40px rgba(0,0,0,0.6); /* 加強陰影讓置中感更強 */
-            
-            /* 這裡設定安全距離：上下左右各留 2% 的黑邊，視覺最舒服 */
+            box-shadow: 0 0 40px rgba(0,0,0,0.6);
+            /* 預設限制，確保全頁顯示 */
             max-width: 96dvw; 
             max-height: 96dvh;
-            
-            /* 強制水平置中 */
             margin: 0 auto;
-            
             object-fit: contain;
         }
 
@@ -131,22 +124,40 @@
             minScale: 1,
             startScale: 1, 
             contain: 'outside',
-            cursor: 'default'
+            cursor: 'default',
+            // 這裡可以選擇是否完全關閉兩指縮放，如果您覺得衝突很嚴重，可以取消下面這行的註解
+            // disableZoom: true, 
         });
 
+        // 電腦版滾輪縮放保留
         stage.addEventListener('wheel', panzoom.zoomWithWheel);
         
+        // --- 核心修改：智慧雙擊縮放邏輯 ---
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
             var tapLength = currentTime - lastTap;
+            
+            // 偵測雙擊 (間隔小於 300ms)
             if (tapLength < 300 && tapLength > 0) {
-                panzoom.reset();
-                e.preventDefault();
+                e.preventDefault(); // 防止瀏覽器預設行為
+                
+                // 取得目前的縮放倍率
+                var currentScale = panzoom.getScale();
+
+                if (currentScale > 1.2) {
+                    // 如果已經是放大狀態 -> 縮小回原狀 (Reset)
+                    panzoom.reset({ animate: true });
+                } else {
+                    // 如果是全頁狀態 -> 放大 2.5 倍
+                    // 這裡設定放大到 2.5 倍，您可以根據需求修改這個數字
+                    panzoom.zoom(2.5, { animate: true });
+                }
             }
             lastTap = currentTime;
         });
 
+        // 載入 PDF
         pdfjsLib.getDocument(url).promise.then(function(pdfDoc_) {
             pdfDoc = pdfDoc_;
             document.getElementById('page-count').textContent = pdfDoc.numPages;
@@ -157,14 +168,10 @@
 
         function renderPage(num) {
             pageRendering = true;
-            
             pdfDoc.getPage(num).then(function(page) {
-                // Retina 螢幕優化
                 var viewportRaw = page.getViewport({scale: 1});
                 var devicePixel = window.devicePixelRatio || 1;
                 var outputScale = Math.max(devicePixel, 2); 
-                
-                // 這裡我們直接產生高解析度圖源，大小交給 CSS 控制
                 var viewport = page.getViewport({scale: 2}); 
 
                 canvas.width = viewport.width;
@@ -179,11 +186,7 @@
 
                 renderTask.promise.then(function() {
                     pageRendering = false;
-                    
-                    // 渲染完後，強制歸零置中
-                    setTimeout(() => { 
-                         panzoom.reset(); 
-                    }, 50);
+                    setTimeout(() => { panzoom.reset(); }, 50);
 
                     if (pageNumPending !== null) {
                         renderPage(pageNumPending);
@@ -220,6 +223,7 @@
             if(e.key === "ArrowRight") onNextPage();
         });
 
+        // 滑動翻頁邏輯
         let touchStartX = 0;
         let touchEndX = 0;
         
@@ -229,6 +233,8 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
+            // 防呆：只有在「沒有放大」的時候 (Scale < 1.2) 才允許翻頁
+            // 這樣放大看圖時，滑動手指就只會移動畫面，不會跳頁
             if (panzoom.getScale() < 1.2) {
                 if (touchEndX < touchStartX - 60) onNextPage();
                 if (touchEndX > touchStartX + 60) onPrevPage();
