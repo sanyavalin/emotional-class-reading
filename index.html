@@ -51,6 +51,8 @@
             object-fit: contain;
             background-color: #202020; 
             transition: opacity 0.15s;
+            /* 移除 transform transition，避免干擾 JS 的手動計算 */
+            transform-origin: center center; 
         }
 
         /* 翻頁按鈕 */
@@ -91,21 +93,14 @@
             z-index: 1000;
             pointer-events: none;
         }
-
-        /* 版本標記 (讓你知道有沒有更新成功) */
+        
         #ver-tag {
-            position: absolute;
-            top: 0; left: 0;
-            padding: 5px;
-            color: #444;
-            font-size: 10px;
-            z-index: 2000;
-            pointer-events: none;
+            position: absolute; top:0; left:0; padding:5px; color:#555; font-size:10px; z-index:2000; pointer-events:none;
         }
     </style>
 </head>
 <body>
-    <div id="ver-tag">V17</div>
+    <div id="ver-tag">V18</div>
 
     <div id="reader-stage">
         <div id="zoom-container">
@@ -141,22 +136,20 @@
         var ctx2 = canvas2.getContext('2d');
         var currentCanvasIndex = 1; 
 
-        canvas1.style.opacity = 1;
-        canvas1.style.zIndex = 10;
-        canvas2.style.opacity = 0;
-        canvas2.style.zIndex = 1;
+        canvas1.style.opacity = 1; canvas1.style.zIndex = 10;
+        canvas2.style.opacity = 0; canvas2.style.zIndex = 1;
 
         const panzoom = Panzoom(zoomContainer, {
-            maxScale: 6,       // 放大倍率上限提高
+            maxScale: 6,
             minScale: 1,
             startScale: 1, 
-            contain: 'outside', // 初始狀態設為 outside (確保一開始置中)
+            contain: 'outside',
             cursor: 'default',
         });
 
         stage.addEventListener('wheel', panzoom.zoomWithWheel);
         
-        // --- V17 核心修正 ---
+        // --- V18 核心：手動數學計算 ---
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
@@ -167,27 +160,41 @@
                 var currentScale = panzoom.getScale();
 
                 if (currentScale > 1.2) {
-                    // 縮小指令
+                    // 縮小 (Reset)
+                    // 縮小可以保留動畫，因為回到中心比較單純
                     panzoom.reset({ animate: true });
-                    
-                    // 等縮小動畫結束後(約300ms)，再把警衛(contain)請回來
-                    // 這樣才不會在縮小的過程中卡卡的
-                    setTimeout(() => {
-                        panzoom.setOptions({ contain: 'outside' });
-                    }, 300);
+                    setTimeout(() => { panzoom.setOptions({ contain: 'outside' }); }, 300);
 
                 } else {
-                    // 放大指令
+                    // 放大 (Zoom In)
                     var touch = e.changedTouches[0];
-                    
-                    // 1. 徹底關閉邊界限制 (設為 false)
-                    // 這是解決「跳回中間」的唯一解法
-                    panzoom.setOptions({ contain: false });
+                    var clickX = touch.clientX;
+                    var clickY = touch.clientY;
 
-                    // 2. 執行放大
-                    panzoom.zoom(3, { // 稍微加大倍率讓效果更明顯
-                        animate: true,
-                        focal: { x: touch.clientX, y: touch.clientY } 
+                    // 1. 解除限制
+                    panzoom.setOptions({ contain: null });
+
+                    // 2. 設定目標倍率
+                    var targetScale = 3.5; 
+
+                    // 3. 取得螢幕中心點
+                    var centerX = window.innerWidth / 2;
+                    var centerY = window.innerHeight / 2;
+
+                    // 4. 計算偏移向量 (從中心點到點擊點的距離)
+                    var deltaX = clickX - centerX;
+                    var deltaY = clickY - centerY;
+
+                    // 5. 計算需要補償的位移量
+                    // 原理：如果要把點擊點移回中心，我們需要反向移動 (delta * scale)
+                    // 但因為 Panzoom 是基於目前的中心做變形，這裡使用簡化公式：
+                    // 我們直接告訴 Panzoom：「請以 (clickX, clickY) 為焦點放大」
+                    // 並且 **關閉動畫 (animate: false)**。
+                    // 關閉動畫是解決 Safari 座標飄移的最有效方法，因為它會直接跳到結果，不會運算中間值。
+                    
+                    panzoom.zoom(targetScale, { 
+                        animate: false, // 關鍵：關閉動畫，追求精準
+                        focal: { x: clickX, y: clickY } 
                     });
                 }
             }
@@ -239,10 +246,10 @@
 
                     currentCanvasIndex = (currentCanvasIndex === 1) ? 2 : 1;
 
-                    // 換頁時，確保是置中且有限制的狀態
+                    // 換頁重置
                     setTimeout(() => { 
                         panzoom.setOptions({ contain: 'outside' });
-                        panzoom.reset(); 
+                        panzoom.reset({ animate: false }); // 換頁也建議瞬間重置，避免殘影
                     }, 50);
 
                     if (pageNumPending !== null) {
@@ -296,7 +303,7 @@
         });
         
         window.addEventListener('resize', function() {
-            panzoom.reset();
+            panzoom.reset({ animate: false });
         });
     </script>
 </body>
