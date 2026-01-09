@@ -12,6 +12,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         
         body, html {
+            /* 使用 dvh 確保手機瀏覽器工具列不會蓋住內容 */
             height: 100dvh; 
             width: 100dvw;
             background-color: #202020; 
@@ -22,35 +23,44 @@
             font-family: sans-serif;
         }
 
-        /* 舞台：負責把「緊身衣容器」放在螢幕正中間 */
         #reader-stage {
             width: 100%;
             height: 100%;
-            display: grid;
-            place-items: center; /* 讓內容物絕對置中 */
+            /* 改回 Flexbox，這在手機上處理置中與防溢出最穩定 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
             background-color: #202020; 
-            overflow: hidden;
+            position: relative;
         }
 
-        /* 縮放容器：V20 改為動態大小，不再是 100% */
-        /* 這就是那件「緊身衣」，它會剛好包住 Canvas，不多不少 */
         #zoom-container {
-            width: auto;   /* 初始值，JS 會修改 */
+            /* 讓容器自動適應內容，但絕不超過螢幕 */
+            width: auto;
             height: auto;
-            position: relative;
-            background-color: #202020; 
+            max-width: 100%;
+            max-height: 100%;
             
-            /* 讓 Panzoom 的變形基準回歸中心，這是最自然的放大方式 */
-            transform-origin: center center; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            
+            outline: none;
+            background-color: #202020; 
+            position: relative;
+            
+            /* 關鍵：變形原點設為中心，配合 JS 的位移計算 */
+            transform-origin: center center;
         }
 
         canvas {
-            position: absolute;
-            top: 0; left: 0; /* 確保 Canvas 貼齊緊身衣 */
             display: block;
-            box-shadow: 0 0 50px rgba(0,0,0,0.9);
-            width: 100%;  /* 跟隨緊身衣大小 */
-            height: 100%; 
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            
+            /* 這裡使用 CSS 限制最大尺寸，保留一點邊距 (94%) 避免貼邊 */
+            max-width: 94dvw; 
+            max-height: 94dvh;
+            
             object-fit: contain;
             background-color: #202020; 
             transition: opacity 0.15s;
@@ -60,7 +70,7 @@
             position: absolute;
             top: 50%;
             transform: translateY(-50%);
-            width: 80px;
+            width: 80px; /* 加大按鈕感應區 */
             height: 150px;
             display: flex;
             justify-content: center;
@@ -72,17 +82,13 @@
             transition: all 0.2s;
             -webkit-tap-highlight-color: transparent; 
         }
-        .nav-btn:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.8);
-        }
-
+        
         #prev-btn { left: 0; padding-right: 20px; }
         #next-btn { right: 0; padding-left: 20px; }
 
         #page-loader {
             position: absolute;
-            bottom: 25px; 
+            bottom: 30px; /* 手機底部通常有操作條，提高一點 */
             left: 50%;
             transform: translateX(-50%);
             background: rgba(30, 30, 30, 0.8);
@@ -100,7 +106,7 @@
     </style>
 </head>
 <body>
-    <div id="ver-tag">V20</div>
+    <div id="ver-tag">V21</div>
 
     <div id="reader-stage">
         <div id="zoom-container">
@@ -135,51 +141,52 @@
         var ctx1 = canvas1.getContext('2d');
         var ctx2 = canvas2.getContext('2d');
         var currentCanvasIndex = 1; 
+        
+        // 延遲初始化 Panzoom 變數
+        var panzoom = null; 
 
         canvas1.style.opacity = 1; canvas1.style.zIndex = 10;
         canvas2.style.opacity = 0; canvas2.style.zIndex = 1;
 
-        const panzoom = Panzoom(zoomContainer, {
-            maxScale: 6,
-            minScale: 1,
-            startScale: 1, 
-            contain: 'outside',
-            cursor: 'default',
-        });
-
-        stage.addEventListener('wheel', panzoom.zoomWithWheel);
-        
+        // --- 雙擊事件監聽 ---
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
             var tapLength = currentTime - lastTap;
             
-            if (tapLength < 300 && tapLength > 0) {
+            // 確保 Panzoom 已經初始化
+            if (tapLength < 300 && tapLength > 0 && panzoom) {
                 e.preventDefault(); 
                 var currentScale = panzoom.getScale();
 
                 if (currentScale > 1.2) {
-                    // 縮小 (保留動畫)
+                    // 縮小
                     panzoom.reset({ animate: true });
                     setTimeout(() => { panzoom.setOptions({ contain: 'outside' }); }, 300);
-
                 } else {
-                    // 放大 (Zoom In)
+                    // 放大
                     var touch = e.changedTouches[0];
-                    
-                    // 解除限制
+                    var clickX = touch.clientX;
+                    var clickY = touch.clientY;
+
+                    // 解除邊界限制
                     panzoom.setOptions({ contain: null });
 
-                    // 因為容器現在剛好包住圖片，所以 touch.clientX 直接對應圖片上的位置
-                    // 這次我們開啟動畫 animate: true
-                    panzoom.zoom(3, { 
+                    // 執行放大
+                    // 注意：這裡我們不讓 Panzoom 自動計算，而是直接指定
+                    panzoom.zoom(3.0, { 
                         animate: true,
-                        focal: { x: touch.clientX, y: touch.clientY } 
+                        focal: { x: clickX, y: clickY } 
                     });
                 }
             }
             lastTap = currentTime;
         });
+
+        // 綁定電腦版滾輪 (稍微延遲綁定)
+        setTimeout(() => {
+            if(panzoom) stage.addEventListener('wheel', panzoom.zoomWithWheel);
+        }, 1000);
 
         pdfjsLib.getDocument(url).promise.then(function(pdfDoc_) {
             pdfDoc = pdfDoc_;
@@ -197,37 +204,14 @@
             var targetCtx = (currentCanvasIndex === 1) ? ctx2 : ctx1;
 
             pdfDoc.getPage(num).then(function(page) {
-                // 1. 計算螢幕可用大小 (扣掉一點邊距)
-                var screenW = window.innerWidth;
-                var screenH = window.innerHeight;
-                
-                // 2. 取得 PDF 原始比例
-                var viewportRaw = page.getViewport({scale: 1});
-                
-                // 3. 計算「剛好塞進螢幕」的顯示尺寸 (Display Size)
-                // 這裡我們保留 4vw 的總邊距，避免貼太死
-                var scaleW = (screenW * 0.96) / viewportRaw.width;
-                var scaleH = (screenH * 0.96) / viewportRaw.height;
-                var fitScale = Math.min(scaleW, scaleH);
-                
-                var displayW = Math.floor(viewportRaw.width * fitScale);
-                var displayH = Math.floor(viewportRaw.height * fitScale);
+                // 1. 取得高畫質尺寸 (Scale 2 for Retina)
+                var viewport = page.getViewport({scale: 2}); 
 
-                // --- V20 關鍵：設定緊身衣容器大小 ---
-                // 我們直接把 zoom-container 設為跟 PDF 顯示大小一模一樣
-                zoomContainer.style.width = displayW + "px";
-                zoomContainer.style.height = displayH + "px";
-
-                // 4. 準備高解析度渲染 (High DPI)
-                var devicePixel = window.devicePixelRatio || 1;
-                var outputScale = Math.max(devicePixel, 2); 
-                var viewport = page.getViewport({scale: fitScale * outputScale});
-
-                // 5. 設定 Canvas 內部解析度
+                // 2. 設定 Canvas 內部解析度
                 targetCanvas.width = viewport.width;
                 targetCanvas.height = viewport.height;
                 
-                // 6. 塗黑防閃爍
+                // 3. 塗黑防閃爍
                 targetCtx.fillStyle = "#202020";
                 targetCtx.fillRect(0,0, targetCanvas.width, targetCanvas.height);
 
@@ -250,11 +234,23 @@
 
                     currentCanvasIndex = (currentCanvasIndex === 1) ? 2 : 1;
 
-                    // 換頁重置
-                    setTimeout(() => { 
+                    // --- V21 關鍵：渲染完成後，才初始化或更新 Panzoom ---
+                    // 這樣確保 Panzoom 抓到的是已經被 CSS 撐開、正確大小的容器
+                    if (!panzoom) {
+                        panzoom = Panzoom(zoomContainer, {
+                            maxScale: 6,
+                            minScale: 1,
+                            startScale: 1, 
+                            contain: 'outside',
+                            cursor: 'default',
+                        });
+                        // 補綁定滾輪
+                        stage.addEventListener('wheel', panzoom.zoomWithWheel);
+                    } else {
+                        // 如果已經有了，重置狀態
                         panzoom.setOptions({ contain: 'outside' });
-                        panzoom.reset({ animate: false }); 
-                    }, 50);
+                        panzoom.reset({ animate: false });
+                    }
 
                     if (pageNumPending !== null) {
                         renderPage(pageNumPending);
@@ -300,15 +296,16 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
-            if (panzoom.getScale() < 1.2) {
+            // 防呆：只有在未放大時才允許滑動翻頁
+            if (panzoom && panzoom.getScale() < 1.2) {
                 if (touchEndX < touchStartX - 60) onNextPage();
                 if (touchEndX > touchStartX + 60) onPrevPage();
             }
         });
         
         window.addEventListener('resize', function() {
-            // 視窗改變時，重新計算頁面大小 (因為緊身衣尺寸要變)
-            renderPage(pageNum);
+            // 手機旋轉時，重置縮放
+            if(panzoom) panzoom.reset({ animate: false });
         });
     </script>
 </body>
