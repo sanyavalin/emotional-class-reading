@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>班級閱讀教材</title>
+    <style>
+        /* 讓網頁全螢幕，不要有白邊 */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background-color: #333; /* 背景深灰色，保護眼睛 */
+        }
+        
+        /* 閱讀器容器設定 */
+        .pdf-container {
+            width: 100%;
+            height: 100vh; /* 佔滿視窗高度 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 嵌入 PDF 的區塊 */
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* 備用按鈕：如果平板太舊跑不出來顯示這個 */
+        .fallback {
+            display: none;
+            color: white;
+            text-align: center;
+            font-family: sans-serif;
+        }
+        
+        /* 針對不支援 iframe 的舊裝置顯示備用訊息 */
+        iframe:not(:defined) + .fallback {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="pdf-container">
+        <iframe src="book.pdf#view=FitH" allow="autoplay">
+            <div class="fallback" style="display:block; padding: 20px;">
+                <p>您的平板似乎無法直接預覽 PDF。</p>
+                <a href="book.pdf" style="color: #4CAF50; font-size: 20px; text-decoration: none; border: 2px solid #4CAF50; padding: 10px 20px; border-radius: 5px;">點擊這裡開啟教材</a>
+            </div>
+        </iframe>
+    </div>
+
+</body>
+</html>
