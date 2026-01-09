@@ -11,11 +11,12 @@
         /* CSS Reset */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         
+        /* V22 關鍵修正：使用 fixed 強制鎖定視窗範圍，解決 iOS 網址列干擾 */
         body, html {
-            /* 使用 dvh 確保手機瀏覽器工具列不會蓋住內容 */
-            height: 100dvh; 
-            width: 100dvw;
-            background-color: #202020; 
+            position: fixed; /* 鎖死！ */
+            top: 0; left: 0; right: 0; bottom: 0;
+            width: 100%; height: 100%;
+            background-color: #000; /* 改全黑，避免視覺干擾 */
             overflow: hidden; 
             touch-action: none;
             -webkit-user-select: none;
@@ -26,52 +27,39 @@
         #reader-stage {
             width: 100%;
             height: 100%;
-            /* 改回 Flexbox，這在手機上處理置中與防溢出最穩定 */
             display: flex;
             justify-content: center;
             align-items: center;
-            background-color: #202020; 
+            background-color: #000; 
             position: relative;
         }
 
         #zoom-container {
-            /* 讓容器自動適應內容，但絕不超過螢幕 */
-            width: auto;
-            height: auto;
-            max-width: 100%;
-            max-height: 100%;
-            
+            /* 這裡先不設大小，完全交給 JS 控制 */
+            width: 0; 
+            height: 0;
             display: flex;
             justify-content: center;
             align-items: center;
-            
             outline: none;
-            background-color: #202020; 
             position: relative;
-            
-            /* 關鍵：變形原點設為中心，配合 JS 的位移計算 */
             transform-origin: center center;
         }
 
         canvas {
             display: block;
-            box-shadow: 0 0 30px rgba(0,0,0,0.8);
-            
-            /* 這裡使用 CSS 限制最大尺寸，保留一點邊距 (94%) 避免貼邊 */
-            max-width: 94dvw; 
-            max-height: 94dvh;
-            
+            box-shadow: 0 0 20px rgba(255,255,255,0.1); /* 微微白光區分邊界 */
+            /* 移除 CSS max-width/height，改由 JS 精準控制 */
             object-fit: contain;
             background-color: #202020; 
-            transition: opacity 0.15s;
         }
 
         .nav-btn {
             position: absolute;
             top: 50%;
             transform: translateY(-50%);
-            width: 80px; /* 加大按鈕感應區 */
-            height: 150px;
+            width: 15%; /* 加大感應區 */
+            height: 60%;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -79,21 +67,21 @@
             z-index: 999;
             color: rgba(255, 255, 255, 0.2);
             font-size: 50px;
-            transition: all 0.2s;
+            /* 移除點擊高亮 */
             -webkit-tap-highlight-color: transparent; 
         }
         
-        #prev-btn { left: 0; padding-right: 20px; }
-        #next-btn { right: 0; padding-left: 20px; }
+        #prev-btn { left: 0; justify-content: flex-start; padding-left: 10px; }
+        #next-btn { right: 0; justify-content: flex-end; padding-right: 10px; }
 
         #page-loader {
             position: absolute;
-            bottom: 30px; /* 手機底部通常有操作條，提高一點 */
+            bottom: 40px; /* 為了閃避 iPhone Home Bar 提高位置 */
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(30, 30, 30, 0.8);
-            color: #ccc;
-            padding: 6px 16px;
+            background: rgba(50, 50, 50, 0.9);
+            color: #fff;
+            padding: 8px 18px;
             border-radius: 30px;
             font-size: 14px;
             z-index: 1000;
@@ -101,12 +89,13 @@
         }
         
         #ver-tag {
-            position: absolute; top:0; left:0; padding:5px; color:#555; font-size:10px; z-index:2000; pointer-events:none;
+            position: absolute; top: 10px; left: 10px; 
+            color: #666; font-size: 12px; z-index: 2000; pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <div id="ver-tag">V21</div>
+    <div id="ver-tag">V22</div>
 
     <div id="reader-stage">
         <div id="zoom-container">
@@ -123,7 +112,9 @@
     </div>
 
     <script>
+        // 嚴格禁止 iOS 縮放整個網頁
         document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+        document.addEventListener('touchmove', function (e) { if (e.scale !== 1) { e.preventDefault(); } }, { passive: false });
 
         var url = 'book.pdf';
 
@@ -142,48 +133,45 @@
         var ctx2 = canvas2.getContext('2d');
         var currentCanvasIndex = 1; 
         
-        // 延遲初始化 Panzoom 變數
         var panzoom = null; 
 
         canvas1.style.opacity = 1; canvas1.style.zIndex = 10;
         canvas2.style.opacity = 0; canvas2.style.zIndex = 1;
 
-        // --- 雙擊事件監聽 ---
+        // --- V22 修正雙擊監聽 ---
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
             var tapLength = currentTime - lastTap;
             
-            // 確保 Panzoom 已經初始化
-            if (tapLength < 300 && tapLength > 0 && panzoom) {
+            // 只要是雙擊，就執行，不管 Panzoom 是否初始化完成 (防呆)
+            if (tapLength < 350 && tapLength > 0) {
                 e.preventDefault(); 
-                var currentScale = panzoom.getScale();
+                
+                if (!panzoom) return; // 如果還沒載入好，就不動
 
+                var currentScale = panzoom.getScale();
                 if (currentScale > 1.2) {
                     // 縮小
                     panzoom.reset({ animate: true });
+                    // 延遲恢復邊界限制
                     setTimeout(() => { panzoom.setOptions({ contain: 'outside' }); }, 300);
                 } else {
                     // 放大
                     var touch = e.changedTouches[0];
-                    var clickX = touch.clientX;
-                    var clickY = touch.clientY;
-
-                    // 解除邊界限制
+                    // 解除限制
                     panzoom.setOptions({ contain: null });
-
-                    // 執行放大
-                    // 注意：這裡我們不讓 Panzoom 自動計算，而是直接指定
+                    // 放大
                     panzoom.zoom(3.0, { 
                         animate: true,
-                        focal: { x: clickX, y: clickY } 
+                        focal: { x: touch.clientX, y: touch.clientY } 
                     });
                 }
             }
             lastTap = currentTime;
         });
 
-        // 綁定電腦版滾輪 (稍微延遲綁定)
+        // 電腦滾輪
         setTimeout(() => {
             if(panzoom) stage.addEventListener('wheel', panzoom.zoomWithWheel);
         }, 1000);
@@ -204,14 +192,46 @@
             var targetCtx = (currentCanvasIndex === 1) ? ctx2 : ctx1;
 
             pdfDoc.getPage(num).then(function(page) {
-                // 1. 取得高畫質尺寸 (Scale 2 for Retina)
-                var viewport = page.getViewport({scale: 2}); 
+                
+                // --- V22 核心：JS 強制算數，取代 CSS ---
+                
+                // 1. 獲取目前「真正」的視窗可用大小
+                var winW = window.innerWidth;
+                var winH = window.innerHeight;
 
-                // 2. 設定 Canvas 內部解析度
+                // 2. 取得 PDF 原始比例
+                var viewportRaw = page.getViewport({scale: 1});
+                
+                // 3. 計算能塞進視窗的最大尺寸 (保留 20px 安全邊距)
+                var safeW = winW;
+                var safeH = winH; 
+                
+                // 計算縮放比
+                var scaleW = safeW / viewportRaw.width;
+                var scaleH = safeH / viewportRaw.height;
+                var fitScale = Math.min(scaleW, scaleH) * 0.96; // 乘 0.96 留一點點黑邊，避免貼死
+
+                // 算出最終顯示大小 (整數化避免模糊)
+                var displayW = Math.floor(viewportRaw.width * fitScale);
+                var displayH = Math.floor(viewportRaw.height * fitScale);
+
+                // 4. 強制設定容器大小 (這一手是為了解決手機版跑版)
+                zoomContainer.style.width = displayW + "px";
+                zoomContainer.style.height = displayH + "px";
+
+                // 5. 高畫質渲染 (Retina)
+                // 顯示尺寸是 displayW，但內部像素我們用 2 倍，這樣放大才清楚
+                var viewport = page.getViewport({scale: fitScale * 2}); 
+
+                // 設定 Canvas 屬性
                 targetCanvas.width = viewport.width;
                 targetCanvas.height = viewport.height;
                 
-                // 3. 塗黑防閃爍
+                // 強制 Canvas 顯示大小跟容器一樣
+                targetCanvas.style.width = "100%";
+                targetCanvas.style.height = "100%";
+
+                // 塗黑
                 targetCtx.fillStyle = "#202020";
                 targetCtx.fillRect(0,0, targetCanvas.width, targetCanvas.height);
 
@@ -234,8 +254,7 @@
 
                     currentCanvasIndex = (currentCanvasIndex === 1) ? 2 : 1;
 
-                    // --- V21 關鍵：渲染完成後，才初始化或更新 Panzoom ---
-                    // 這樣確保 Panzoom 抓到的是已經被 CSS 撐開、正確大小的容器
+                    // 初始化或重置 Panzoom
                     if (!panzoom) {
                         panzoom = Panzoom(zoomContainer, {
                             maxScale: 6,
@@ -244,10 +263,9 @@
                             contain: 'outside',
                             cursor: 'default',
                         });
-                        // 補綁定滾輪
                         stage.addEventListener('wheel', panzoom.zoomWithWheel);
                     } else {
-                        // 如果已經有了，重置狀態
+                        // 換頁時，重置縮放
                         panzoom.setOptions({ contain: 'outside' });
                         panzoom.reset({ animate: false });
                     }
@@ -296,16 +314,15 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
-            // 防呆：只有在未放大時才允許滑動翻頁
             if (panzoom && panzoom.getScale() < 1.2) {
                 if (touchEndX < touchStartX - 60) onNextPage();
                 if (touchEndX > touchStartX + 60) onPrevPage();
             }
         });
         
+        // 旋轉手機時，重新計算大小
         window.addEventListener('resize', function() {
-            // 手機旋轉時，重置縮放
-            if(panzoom) panzoom.reset({ animate: false });
+            renderPage(pageNum);
         });
     </script>
 </body>
