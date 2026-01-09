@@ -3,40 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>班級閱讀教材 (完美適配版)</title>
+    <title>班級閱讀教材 (修正置中版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
     
     <style>
+        * { box-sizing: border-box; }
         body, html {
             margin: 0;
             padding: 0;
             height: 100%;
+            width: 100%;
             overflow: hidden;
-            background-color: #2c2c2c; /* 深色背景 */
-            font-family: Arial, sans-serif;
-            touch-action: none; 
+            background-color: #2c2c2c;
+            font-family: sans-serif;
+            touch-action: none; /* 停用瀏覽器預設觸控 */
         }
 
-        /* 閱讀舞台 */
+        /* 最外層容器：負責把東西置中 */
         #reader-stage {
             width: 100%;
             height: 100%;
             display: flex;
-            justify-content: center;
-            align-items: center; /* 讓 PDF 永遠垂直水平置中 */
+            justify-content: center; /* 水平置中 */
+            align-items: center;     /* 垂直置中 */
             position: relative;
             overflow: hidden;
         }
 
-        /* 畫布容器 */
+        /* 畫布的包裝層：Panzoom 控制這個 */
         #canvas-wrapper {
-            /* 這裡不設固定大小，交給 JS 動態計算 */
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            /* 這裡很重要：預設為 0，由 JS 撐開，避免一開始太寬導致偏移 */
+            width: auto;
+            height: auto;
+            margin: auto; /* 雙重保險置中 */
         }
 
         canvas {
-            display: block; /* 消除底部留白 */
+            display: block;
+            /* 預設隱藏，等計算好位置再顯示，避免閃爍 */
+            visibility: hidden; 
         }
 
         /* 翻頁按鈕 */
@@ -44,66 +50,56 @@
             position: absolute;
             top: 50%;
             transform: translateY(-50%);
-            width: 60px;
-            height: 100px;
-            background-color: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 40px;
+            width: 70px;
+            height: 120px;
             display: flex;
             justify-content: center;
             align-items: center;
             cursor: pointer;
             z-index: 100;
-            border-radius: 12px;
             user-select: none;
-            transition: all 0.2s;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 40px;
+            transition: background 0.2s;
+            border-radius: 8px;
         }
-        .nav-btn:active { background-color: rgba(255, 255, 255, 0.4); }
-        
-        #prev-btn { left: 10px; }
-        #next-btn { right: 10px; }
-
-        /* 隱藏預設按鈕，只在滑鼠移過去或點擊時變明顯 */
-        @media (hover: hover) {
-            .nav-btn { opacity: 0; }
-            .nav-btn:hover { opacity: 1; background-color: rgba(255, 255, 255, 0.2); }
-        }
+        .nav-btn:active { background-color: rgba(255,255,255,0.1); }
+        #prev-btn { left: 0; }
+        #next-btn { right: 0; }
 
         /* 頁碼 */
         #page-loader {
             position: absolute;
-            bottom: 20px;
+            bottom: 15px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.6);
             color: white;
-            padding: 6px 14px;
-            border-radius: 20px;
+            padding: 5px 12px;
+            border-radius: 15px;
             font-size: 14px;
             z-index: 100;
             pointer-events: none;
         }
 
-        #loading-spinner {
+        #loading-msg {
             position: absolute;
-            top: 50%;
-            left: 50%;
+            top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             color: white;
-            font-size: 18px;
-            z-index: 200;
+            font-size: 16px;
         }
     </style>
 </head>
 <body>
 
-    <div id="loading-spinner">教材載入中...</div>
+    <div id="loading-msg">載入中...</div>
 
     <div id="reader-stage">
         <div id="canvas-wrapper">
             <canvas id="the-canvas"></canvas>
         </div>
-
+        
         <div id="prev-btn" class="nav-btn" onclick="onPrevPage()">&#10094;</div>
         <div id="next-btn" class="nav-btn" onclick="onNextPage()">&#10095;</div>
     </div>
@@ -125,81 +121,82 @@
             wrapper = document.getElementById('canvas-wrapper'),
             stage = document.getElementById('reader-stage');
 
-        // 初始化 Panzoom
+        // 初始化 Panzoom (設定縮放極限)
         const panzoom = Panzoom(wrapper, {
-            maxScale: 4,
+            maxScale: 5,
             minScale: 1,
             startScale: 1,
-            contain: 'outside', // 確保不會把圖拖到不見
+            contain: 'outside'
         });
 
-        // 綁定滑鼠滾輪縮放
+        // 綁定滾輪
         stage.addEventListener('wheel', panzoom.zoomWithWheel);
 
-        // 雙擊還原
+        // 綁定雙擊還原
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
             var tapLength = currentTime - lastTap;
             if (tapLength < 300 && tapLength > 0) {
-                panzoom.reset(); // 重置回全螢幕大小
+                panzoom.reset();
                 e.preventDefault();
             }
             lastTap = currentTime;
         });
 
-        // 載入 PDF
+        // 下載 PDF
         pdfjsLib.getDocument(url).promise.then(function(pdfDoc_) {
             pdfDoc = pdfDoc_;
             document.getElementById('page-count').textContent = pdfDoc.numPages;
-            document.getElementById('loading-spinner').style.display = 'none';
+            document.getElementById('loading-msg').style.display = 'none';
             renderPage(pageNum);
-        }).catch(function(error) {
-            console.error(error);
-            document.getElementById('loading-spinner').innerHTML = '無法讀取 PDF<br>請確認檔名為 book.pdf';
         });
 
         function renderPage(num) {
             pageRendering = true;
             
-            // 每次翻頁都先重置縮放，確保學生看到的是整頁
+            // 1. 先重置縮放，避免位置計算錯誤
             panzoom.reset();
 
             pdfDoc.getPage(num).then(function(page) {
                 
-                // --- 關鍵修正：自動計算適合螢幕的大小 ---
+                // --- 步驟 A：計算「剛好塞滿螢幕」的尺寸 ---
                 
-                // 1. 先取得頁面原始大小 (scale 1)
-                var unscaledViewport = page.getViewport({scale: 1});
+                // 取得 PDF 原始大小 (Scale = 1)
+                var originalViewport = page.getViewport({scale: 1});
                 
-                // 2. 取得目前螢幕(容器)的大小
-                var containerWidth = stage.clientWidth;
-                var containerHeight = stage.clientHeight;
+                // 取得螢幕目前的可用大小 (扣掉一點邊距)
+                var containerW = window.innerWidth;
+                var containerH = window.innerHeight;
 
-                // 3. 計算「寬度」和「高度」分別需要縮小多少才能塞進螢幕
-                var scaleX = (containerWidth - 20) / unscaledViewport.width;  // 減20保留邊距
-                var scaleY = (containerHeight - 20) / unscaledViewport.height;
+                // 計算寬度要縮放多少？高度要縮放多少？取最小的那個比例 (Fit to Screen)
+                var scaleW = containerW / originalViewport.width;
+                var scaleH = containerH / originalViewport.height;
+                var fitScale = Math.min(scaleW, scaleH); // 這是「視覺」縮放比例
 
-                // 4. 取最小值：確保整頁都能塞進去 (Fit Whole Page)
-                var autoFitScale = Math.min(scaleX, scaleY);
+                // --- 步驟 B：設定高畫質渲染 ---
+                
+                // 為了讓放大時清晰，我們在內部用 2 倍解析度繪製 (HiDPI)
+                var pixelRatio = 2; 
+                var renderViewport = page.getViewport({scale: fitScale * pixelRatio});
 
-                // 5. 設定渲染解析度：為了清晰，我們用 2 倍解析度去畫，但顯示時縮小
-                var outputScale = 2; 
-                var viewport = page.getViewport({scale: autoFitScale * outputScale});
+                // 設定 Canvas 的「實體像素」 (很大，為了清晰)
+                canvas.width = renderViewport.width;
+                canvas.height = renderViewport.height;
 
-                // 設定 Canvas 的「像素大小」(高畫質)
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
+                // 設定 Canvas 的「視覺大小」 (剛剛算好的 fitScale，剛好塞滿螢幕)
+                // 這裡一定要加上 'px'，並確保寬高絕對不超過螢幕
+                canvas.style.width = Math.floor(originalViewport.width * fitScale) + "px";
+                canvas.style.height = Math.floor(originalViewport.height * fitScale) + "px";
 
-                // 設定 Canvas 的「顯示大小」(符合螢幕)
-                canvas.style.width = (viewport.width / outputScale) + "px";
-                canvas.style.height = (viewport.height / outputScale) + "px";
+                // 顯示 Canvas (因為算好位置了)
+                canvas.style.visibility = 'visible';
 
-                // --- 結束計算 ---
+                // --- 步驟 C：開始繪製 ---
 
                 var renderContext = {
                     canvasContext: ctx,
-                    viewport: viewport
+                    viewport: renderViewport
                 };
                 
                 var renderTask = page.render(renderContext);
@@ -236,13 +233,13 @@
             queueRenderPage(pageNum);
         }
 
-        // 鍵盤操作
+        // 鍵盤支援
         document.addEventListener('keydown', function(e) {
             if(e.key === "ArrowLeft") onPrevPage();
             if(e.key === "ArrowRight") onNextPage();
         });
 
-        // 滑動翻頁邏輯
+        // 滑動支援 (當沒有放大時)
         let touchStartX = 0;
         let touchEndX = 0;
         
@@ -252,24 +249,19 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
-            handleSwipe();
+            // 只有縮放比例接近 1 時才允許翻頁
+            if (panzoom.getScale() < 1.2) {
+                if (touchEndX < touchStartX - 50) onNextPage();
+                if (touchEndX > touchStartX + 50) onPrevPage();
+            }
         });
 
-        function handleSwipe() {
-            // 如果正在放大檢視，不執行翻頁
-            if (panzoom.getScale() > 1.1) return;
-
-            if (touchEndX < touchStartX - 60) onNextPage(); 
-            if (touchEndX > touchStartX + 60) onPrevPage(); 
-        }
-
-        // 當旋轉螢幕或調整視窗大小時，重新計算適配大小
+        // 旋轉螢幕重繪
         window.addEventListener('resize', function() {
-            // 加個延遲，等待視窗調整完畢
             clearTimeout(window.resizeTimer);
             window.resizeTimer = setTimeout(function() {
                 renderPage(pageNum);
-            }, 200);
+            }, 100); // 縮短延遲讓反應快一點
         });
 
     </script>
