@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>班級閱讀教材 V9 (Mac修正版)</title>
+    <title>班級閱讀教材 V10 </title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://unpkg.com/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
     
@@ -22,22 +22,20 @@
             font-family: sans-serif;
         }
 
-        /* 舞台：使用 Flexbox 置中 */
+        /* 舞台：改用 Grid，這是解決置中偏移的終極手段 */
         #reader-stage {
             width: 100%;
             height: 100%;
-            display: flex; /* 改回 Flex，對 Mac Safari 比較溫柔 */
-            justify-content: center;
-            align-items: center;
+            display: grid;         /* 關鍵改變 */
+            place-items: center;   /* 關鍵改變：水平垂直絕對置中 */
             position: relative;
         }
 
-        /* 縮放容器 */
+        /* 縮放容器：不再設 95%，而是全滿，讓內部內容自己找中心 */
         #zoom-container {
-            /* 關鍵：預設讓它比螢幕小一點，避免 Mac 自動填滿放大 */
-            width: 95%; 
-            height: 95%;
-            display: flex;
+            width: 100%; 
+            height: 100%;
+            display: flex;         /* 內部再次使用 Flex 確保萬無一失 */
             justify-content: center;
             align-items: center;
             outline: none;
@@ -46,11 +44,16 @@
         /* 畫布本體 */
         canvas {
             display: block;
-            box-shadow: 0 0 30px rgba(0,0,0,0.5);
-            /* 這裡使用 CSS 強制約束，不管 JS 算多少，絕不超過容器 */
-            max-width: 100%; 
-            max-height: 100%;
-            object-fit: contain; /* 保持比例 */
+            box-shadow: 0 0 40px rgba(0,0,0,0.6); /* 加強陰影讓置中感更強 */
+            
+            /* 這裡設定安全距離：上下左右各留 2% 的黑邊，視覺最舒服 */
+            max-width: 96dvw; 
+            max-height: 96dvh;
+            
+            /* 強制水平置中 */
+            margin: 0 auto;
+            
+            object-fit: contain;
         }
 
         /* 翻頁按鈕 */
@@ -78,7 +81,6 @@
         #prev-btn { left: 0; padding-right: 20px; }
         #next-btn { right: 0; padding-left: 20px; }
 
-        /* 頁碼 */
         #page-loader {
             position: absolute;
             bottom: 25px; 
@@ -110,9 +112,7 @@
     </div>
 
     <script>
-        document.addEventListener('gesturestart', function (e) {
-            e.preventDefault();
-        });
+        document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
 
         var url = 'book.pdf';
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
@@ -129,14 +129,13 @@
         const panzoom = Panzoom(zoomContainer, {
             maxScale: 5,
             minScale: 1,
-            startScale: 1, // 這裡設為 1，但我們會在 CSS 裡控制容器大小
+            startScale: 1, 
             contain: 'outside',
             cursor: 'default'
         });
 
         stage.addEventListener('wheel', panzoom.zoomWithWheel);
         
-        // 雙擊還原
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
@@ -158,33 +157,19 @@
 
         function renderPage(num) {
             pageRendering = true;
-            // 換頁時，不要立刻重置 Panzoom，避免畫面跳動，我們交給後面的 setTimeout
-
+            
             pdfDoc.getPage(num).then(function(page) {
-                
-                // --- V9 核心邏輯：CSS 主導，JS 輔助 ---
-
-                // 1. 取得 PDF 原始比例
+                // Retina 螢幕優化
                 var viewportRaw = page.getViewport({scale: 1});
-                
-                // 2. 計算高解析度 (Retina 優化)
                 var devicePixel = window.devicePixelRatio || 1;
-                // Mac 上通常是 2，我們設定至少要 2 倍清晰度
                 var outputScale = Math.max(devicePixel, 2); 
                 
-                // 3. 我們不需要在這裡計算 "fitScale" 了，因為我們將透過 CSS object-fit 來控制顯示
-                // 我們只需要產出一張「夠清楚的大圖」給 Canvas 即可
-                // 設定一個固定倍率，例如原始 PDF 的 2 倍大，這樣放大看才清楚
+                // 這裡我們直接產生高解析度圖源，大小交給 CSS 控制
                 var viewport = page.getViewport({scale: 2}); 
 
-                // 4. 設定 Canvas 實體像素 (這決定了清晰度，越大越清楚)
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
                 
-                // 5. 關鍵修改：不設定 canvas.style.width/height
-                // 讓 CSS 的 max-width: 100%; max-height: 100%; 去自動縮放它
-                // 這能解決 Mac 上計算誤差導致的自動放大問題
-
                 var renderContext = {
                     canvasContext: ctx,
                     viewport: viewport
@@ -195,9 +180,7 @@
                 renderTask.promise.then(function() {
                     pageRendering = false;
                     
-                    // 6. 強制歸零大法
-                    // 渲染完成後 50毫秒，強制命令 Panzoom 回到正中間
-                    // 這會消除任何「一打開就放大」的狀況
+                    // 渲染完後，強制歸零置中
                     setTimeout(() => { 
                          panzoom.reset(); 
                     }, 50);
@@ -246,7 +229,6 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
-            // 允許一點點誤差 (Scale < 1.2) 
             if (panzoom.getScale() < 1.2) {
                 if (touchEndX < touchStartX - 60) onNextPage();
                 if (touchEndX > touchStartX + 60) onPrevPage();
@@ -254,8 +236,6 @@
         });
         
         window.addEventListener('resize', function() {
-            // 視窗改變時，只要重置 Panzoom 位置即可，不用重新渲染 Canvas
-            // 這樣效能會好非常多
             panzoom.reset();
         });
     </script>
