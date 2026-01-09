@@ -22,40 +22,38 @@
             font-family: sans-serif;
         }
 
+        /* 舞台：負責把「緊身衣容器」放在螢幕正中間 */
         #reader-stage {
             width: 100%;
             height: 100%;
             display: grid;
-            place-items: center;
-            position: relative;
+            place-items: center; /* 讓內容物絕對置中 */
             background-color: #202020; 
+            overflow: hidden;
         }
 
+        /* 縮放容器：V20 改為動態大小，不再是 100% */
+        /* 這就是那件「緊身衣」，它會剛好包住 Canvas，不多不少 */
         #zoom-container {
-            width: 100%; 
-            height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            outline: none;
-            background-color: #202020; 
+            width: auto;   /* 初始值，JS 會修改 */
+            height: auto;
             position: relative;
+            background-color: #202020; 
             
-            /* --- V19 關鍵修正 --- */
-            /* 將變形原點改為左上角，讓 Panzoom 的數學計算回歸直覺 */
-            /* 這樣點左上角放大時，它會基於座標計算，而不是基於中心點擴散 */
-            transform-origin: 0 0; 
+            /* 讓 Panzoom 的變形基準回歸中心，這是最自然的放大方式 */
+            transform-origin: center center; 
         }
 
         canvas {
             position: absolute;
+            top: 0; left: 0; /* 確保 Canvas 貼齊緊身衣 */
             display: block;
-            box-shadow: 0 0 40px rgba(0,0,0,0.8);
-            max-width: 96dvw; 
-            max-height: 96dvh;
+            box-shadow: 0 0 50px rgba(0,0,0,0.9);
+            width: 100%;  /* 跟隨緊身衣大小 */
+            height: 100%; 
             object-fit: contain;
             background-color: #202020; 
-            transition: opacity 0.1s;
+            transition: opacity 0.15s;
         }
 
         .nav-btn {
@@ -102,7 +100,7 @@
     </style>
 </head>
 <body>
-    <div id="ver-tag">V19</div>
+    <div id="ver-tag">V20</div>
 
     <div id="reader-stage">
         <div id="zoom-container">
@@ -161,25 +159,22 @@
                 var currentScale = panzoom.getScale();
 
                 if (currentScale > 1.2) {
-                    // 縮小 (Reset) - 保留動畫
+                    // 縮小 (保留動畫)
                     panzoom.reset({ animate: true });
                     setTimeout(() => { panzoom.setOptions({ contain: 'outside' }); }, 300);
 
                 } else {
                     // 放大 (Zoom In)
                     var touch = e.changedTouches[0];
-                    var clickX = touch.clientX;
-                    var clickY = touch.clientY;
-
-                    // 1. 解除限制 (讓畫面可以自由移動)
+                    
+                    // 解除限制
                     panzoom.setOptions({ contain: null });
 
-                    // 2. 執行放大
-                    // V19: 加回 animate: true (您要的動畫)
-                    // Panzoom 會自動計算 focal (焦點) 的位移
+                    // 因為容器現在剛好包住圖片，所以 touch.clientX 直接對應圖片上的位置
+                    // 這次我們開啟動畫 animate: true
                     panzoom.zoom(3, { 
                         animate: true,
-                        focal: { x: clickX, y: clickY } 
+                        focal: { x: touch.clientX, y: touch.clientY } 
                     });
                 }
             }
@@ -202,13 +197,37 @@
             var targetCtx = (currentCanvasIndex === 1) ? ctx2 : ctx1;
 
             pdfDoc.getPage(num).then(function(page) {
+                // 1. 計算螢幕可用大小 (扣掉一點邊距)
+                var screenW = window.innerWidth;
+                var screenH = window.innerHeight;
+                
+                // 2. 取得 PDF 原始比例
                 var viewportRaw = page.getViewport({scale: 1});
-                var devicePixel = window.devicePixelRatio || 1;
-                var viewport = page.getViewport({scale: 2}); 
+                
+                // 3. 計算「剛好塞進螢幕」的顯示尺寸 (Display Size)
+                // 這裡我們保留 4vw 的總邊距，避免貼太死
+                var scaleW = (screenW * 0.96) / viewportRaw.width;
+                var scaleH = (screenH * 0.96) / viewportRaw.height;
+                var fitScale = Math.min(scaleW, scaleH);
+                
+                var displayW = Math.floor(viewportRaw.width * fitScale);
+                var displayH = Math.floor(viewportRaw.height * fitScale);
 
+                // --- V20 關鍵：設定緊身衣容器大小 ---
+                // 我們直接把 zoom-container 設為跟 PDF 顯示大小一模一樣
+                zoomContainer.style.width = displayW + "px";
+                zoomContainer.style.height = displayH + "px";
+
+                // 4. 準備高解析度渲染 (High DPI)
+                var devicePixel = window.devicePixelRatio || 1;
+                var outputScale = Math.max(devicePixel, 2); 
+                var viewport = page.getViewport({scale: fitScale * outputScale});
+
+                // 5. 設定 Canvas 內部解析度
                 targetCanvas.width = viewport.width;
                 targetCanvas.height = viewport.height;
                 
+                // 6. 塗黑防閃爍
                 targetCtx.fillStyle = "#202020";
                 targetCtx.fillRect(0,0, targetCanvas.width, targetCanvas.height);
 
@@ -288,7 +307,8 @@
         });
         
         window.addEventListener('resize', function() {
-            panzoom.reset({ animate: false });
+            // 視窗改變時，重新計算頁面大小 (因為緊身衣尺寸要變)
+            renderPage(pageNum);
         });
     </script>
 </body>
