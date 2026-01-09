@@ -14,7 +14,7 @@
         body, html {
             height: 100dvh; 
             width: 100dvw;
-            background-color: #202020; /* 整體背景深色 */
+            background-color: #202020; /* 第一層背景：深黑 */
             overflow: hidden; 
             touch-action: none;
             -webkit-user-select: none;
@@ -28,6 +28,7 @@
             display: grid;
             place-items: center;
             position: relative;
+            background-color: #202020; /* 第二層背景：防漏光 */
         }
 
         #zoom-container {
@@ -37,19 +38,18 @@
             justify-content: center;
             align-items: center;
             outline: none;
+            background-color: #202020; /* 第三層背景：關鍵修正！ */
+            /* 讓容器本身就是黑的，這樣 Canvas 在重繪時如果是透明的，透出來的也是黑色 */
         }
 
         canvas {
             display: block;
-            box-shadow: 0 0 40px rgba(0,0,0,0.6);
+            box-shadow: 0 0 40px rgba(0,0,0,0.8); /* 加深陰影 */
             max-width: 96dvw; 
             max-height: 96dvh;
             margin: 0 auto;
             object-fit: contain;
-            
-            /* --- V13 關鍵修正：設定畫布底色 --- */
-            background-color: #202020; 
-            /* 這樣在圖片還沒跑出來之前，它就是黑的，不會閃白光 */
+            background-color: #202020; /* Canvas 本體也設黑 */
         }
 
         /* 翻頁按鈕 */
@@ -110,7 +110,9 @@
     <script>
         document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
 
-        var url = 'book.pdf'; // 檔名確認
+        // --- 修正點 1：檔名改回 book.pdf ---
+        var url = 'book.pdf';
+
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
         var pdfDoc = null,
@@ -172,16 +174,18 @@
             pdfDoc.getPage(num).then(function(page) {
                 var viewportRaw = page.getViewport({scale: 1});
                 var devicePixel = window.devicePixelRatio || 1;
-                // 設定高解析度
+                var outputScale = Math.max(devicePixel, 2); 
                 var viewport = page.getViewport({scale: 2}); 
 
+                // --- 修正點 2：在改變大小之前，先確保不會變成白色 ---
+                // 我們在 CSS 中已經把 container 設為黑色，這裡雙重保險
                 canvas.width = viewport.width;
                 canvas.height = viewport.height;
                 
-                // --- V13 修正 ---
-                // 在開始畫圖之前，先確保畫布背景是黑的 (透過 CSS)
-                // 這裡我們不需要做額外 JS 設定，因為 CSS 已經處理好了
-                
+                // 用 JS 強制先塗黑 (避免某些瀏覽器渲染延遲)
+                ctx.fillStyle = "#202020";
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+
                 var renderContext = {
                     canvasContext: ctx,
                     viewport: viewport
