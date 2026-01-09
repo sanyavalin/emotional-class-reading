@@ -39,19 +39,20 @@
             align-items: center;
             outline: none;
             background-color: #202020; 
-            position: relative; /* 讓內部 Canvas 絕對定位 */
+            position: relative;
+            /* 讓變形起點預設為中心，但 JS 會動態調整 */
+            transform-origin: center center;
         }
 
-        /* 雙緩衝畫布設定 */
         canvas {
-            position: absolute; /* 兩張畫布重疊在一起 */
+            position: absolute;
             display: block;
             box-shadow: 0 0 40px rgba(0,0,0,0.8);
             max-width: 96dvw; 
             max-height: 96dvh;
             object-fit: contain;
             background-color: #202020; 
-            transition: opacity 0.1s; /* 讓切換更柔和 */
+            transition: opacity 0.1s;
         }
 
         /* 翻頁按鈕 */
@@ -124,16 +125,13 @@
             zoomContainer = document.getElementById('zoom-container'),
             stage = document.getElementById('reader-stage');
 
-        // 雙畫布管理
         var canvas1 = document.getElementById('canvas-1');
         var canvas2 = document.getElementById('canvas-2');
         var ctx1 = canvas1.getContext('2d');
         var ctx2 = canvas2.getContext('2d');
         
-        // currentCanvasIndex: 目前使用者看到的是哪一張 (1 或 2)
         var currentCanvasIndex = 1; 
 
-        // 初始化：先隱藏 canvas 2，顯示 canvas 1
         canvas1.style.opacity = 1;
         canvas1.style.zIndex = 10;
         canvas2.style.opacity = 0;
@@ -143,7 +141,7 @@
             maxScale: 5,
             minScale: 1,
             startScale: 1, 
-            contain: 'outside',
+            contain: 'outside', // 預設還是要有邊界限制
             cursor: 'default',
         });
 
@@ -157,14 +155,28 @@
             if (tapLength < 300 && tapLength > 0) {
                 e.preventDefault(); 
                 var currentScale = panzoom.getScale();
+
                 if (currentScale > 1.2) {
+                    // 縮小回原狀時，恢復邊界限制，確保回到正中間
+                    panzoom.setOptions({ contain: 'outside' });
                     panzoom.reset({ animate: true });
                 } else {
                     var touch = e.changedTouches[0];
+                    
+                    // --- V16 關鍵修正 ---
+                    // 1. 放大前，暫時把「邊界限制」拿掉 (contain: null)
+                    //    這樣程式碼就不會雞婆地把畫面拉回中間
+                    panzoom.setOptions({ contain: null });
+
+                    // 2. 執行焦點縮放
                     panzoom.zoom(2.5, { 
                         animate: true,
                         focal: { x: touch.clientX, y: touch.clientY } 
                     });
+                    
+                    // 3. (選擇性) 您可以決定放大後要不要加回限制
+                    // 為了讓移動更自由，這裡我們保持 null，直到縮小回去時才加回來
+                    // 這樣你在放大狀態下，也可以隨意拖曳到邊邊角角
                 }
             }
             lastTap = currentTime;
@@ -182,8 +194,6 @@
         function renderPage(num) {
             pageRendering = true;
             
-            // 決定誰是「幕後畫布 (Back Buffer)」
-            // 如果現在看的是 1，那我們就在 2 上面畫畫
             var targetCanvas = (currentCanvasIndex === 1) ? canvas2 : canvas1;
             var targetCtx = (currentCanvasIndex === 1) ? ctx2 : ctx1;
 
@@ -192,11 +202,9 @@
                 var devicePixel = window.devicePixelRatio || 1;
                 var viewport = page.getViewport({scale: 2}); 
 
-                // 設定幕後畫布的大小
                 targetCanvas.width = viewport.width;
                 targetCanvas.height = viewport.height;
                 
-                // 畫布塗黑 (保險起見)
                 targetCtx.fillStyle = "#202020";
                 targetCtx.fillRect(0,0, targetCanvas.width, targetCanvas.height);
 
@@ -210,22 +218,20 @@
                 renderTask.promise.then(function() {
                     pageRendering = false;
 
-                    // --- 關鍵時刻：交換畫布 ---
-                    
-                    // 1. 顯示剛剛畫好的那個 (Fade In)
                     targetCanvas.style.zIndex = 10;
                     targetCanvas.style.opacity = 1;
                     
-                    // 2. 隱藏舊的那個 (Fade Out)
                     var oldCanvas = (currentCanvasIndex === 1) ? canvas1 : canvas2;
                     oldCanvas.style.zIndex = 1;
                     oldCanvas.style.opacity = 0;
 
-                    // 3. 更新狀態
                     currentCanvasIndex = (currentCanvasIndex === 1) ? 2 : 1;
 
-                    // 4. 重置縮放
-                    setTimeout(() => { panzoom.reset(); }, 50);
+                    // 換頁時，強制重置狀態和邊界限制
+                    setTimeout(() => { 
+                        panzoom.setOptions({ contain: 'outside' });
+                        panzoom.reset(); 
+                    }, 50);
 
                     if (pageNumPending !== null) {
                         renderPage(pageNumPending);
@@ -271,6 +277,7 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
+            // 防呆：只有在比例接近 1 時 (未放大) 才允許翻頁
             if (panzoom.getScale() < 1.2) {
                 if (touchEndX < touchStartX - 60) onNextPage();
                 if (touchEndX > touchStartX + 60) onPrevPage();
