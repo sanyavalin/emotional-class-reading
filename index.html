@@ -22,6 +22,7 @@
             font-family: sans-serif;
         }
 
+        /* 舞台 */
         #reader-stage {
             width: 100%;
             height: 100%;
@@ -30,6 +31,7 @@
             position: relative;
         }
 
+        /* 縮放容器 */
         #zoom-container {
             width: 100%; 
             height: 100%;
@@ -39,10 +41,10 @@
             outline: none;
         }
 
+        /* 畫布 */
         canvas {
             display: block;
             box-shadow: 0 0 40px rgba(0,0,0,0.6);
-            /* 預設限制，確保全頁顯示 */
             max-width: 96dvw; 
             max-height: 96dvh;
             margin: 0 auto;
@@ -74,6 +76,7 @@
         #prev-btn { left: 0; padding-right: 20px; }
         #next-btn { right: 0; padding-left: 20px; }
 
+        /* 頁碼 */
         #page-loader {
             position: absolute;
             bottom: 25px; 
@@ -107,7 +110,10 @@
     <script>
         document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
 
+        // --- 這裡已修改為您的中文檔名 ---
+        // 請確保 GitHub 上的檔案名稱也一模一樣，包含副檔名 .pdf
         var url = 'book.pdf';
+
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
         var pdfDoc = null,
@@ -125,33 +131,40 @@
             startScale: 1, 
             contain: 'outside',
             cursor: 'default',
-            // 這裡可以選擇是否完全關閉兩指縮放，如果您覺得衝突很嚴重，可以取消下面這行的註解
-            // disableZoom: true, 
         });
 
-        // 電腦版滾輪縮放保留
+        // 電腦版滾輪縮放
         stage.addEventListener('wheel', panzoom.zoomWithWheel);
         
-        // --- 核心修改：智慧雙擊縮放邏輯 ---
+        // --- V12 核心：指尖定點縮放邏輯 ---
         let lastTap = 0;
         stage.addEventListener('touchend', function(e) {
             var currentTime = new Date().getTime();
             var tapLength = currentTime - lastTap;
             
-            // 偵測雙擊 (間隔小於 300ms)
+            // 偵測雙擊
             if (tapLength < 300 && tapLength > 0) {
-                e.preventDefault(); // 防止瀏覽器預設行為
+                e.preventDefault(); 
                 
-                // 取得目前的縮放倍率
+                // 1. 取得目前縮放狀態
                 var currentScale = panzoom.getScale();
 
                 if (currentScale > 1.2) {
-                    // 如果已經是放大狀態 -> 縮小回原狀 (Reset)
+                    // 如果已經放大 -> 縮小回正中間 (Reset)
                     panzoom.reset({ animate: true });
                 } else {
-                    // 如果是全頁狀態 -> 放大 2.5 倍
-                    // 這裡設定放大到 2.5 倍，您可以根據需求修改這個數字
-                    panzoom.zoom(2.5, { animate: true });
+                    // 如果是原圖 -> 針對「點擊位置」放大
+                    
+                    // 取得手指離開時的座標 (也就是點擊點)
+                    var touch = e.changedTouches[0];
+                    var x = touch.clientX;
+                    var y = touch.clientY;
+
+                    // 使用 panzoom 的 focal 選項，指定縮放中心點
+                    panzoom.zoom(2.5, { 
+                        animate: true,
+                        focal: { x: x, y: y } // 告訴程式碼：以這個座標為中心放大
+                    });
                 }
             }
             lastTap = currentTime;
@@ -164,10 +177,13 @@
             renderPage(pageNum);
         }).catch(function(error) {
             console.error(error);
+            // 增加一個簡單的報錯，如果檔名不對會跳出提示
+            alert('找不到檔案：' + url + '\n請確認 GitHub 上的檔名是否完全一致！');
         });
 
         function renderPage(num) {
             pageRendering = true;
+            
             pdfDoc.getPage(num).then(function(page) {
                 var viewportRaw = page.getViewport({scale: 1});
                 var devicePixel = window.devicePixelRatio || 1;
@@ -233,8 +249,7 @@
 
         stage.addEventListener('touchend', e => {
             touchEndX = e.changedTouches[0].screenX;
-            // 防呆：只有在「沒有放大」的時候 (Scale < 1.2) 才允許翻頁
-            // 這樣放大看圖時，滑動手指就只會移動畫面，不會跳頁
+            // 只有在縮小狀態下才允許翻頁
             if (panzoom.getScale() < 1.2) {
                 if (touchEndX < touchStartX - 60) onNextPage();
                 if (touchEndX > touchStartX + 60) onPrevPage();
